@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Arduino Web Uploader</title>
+    <script src="https://cdn.jsdelivr.net/npm/ace-builds@1.4.12/src-noconflict/ace.js"></script>
+    <script src="https://dbuezas.github.io/arduino-web-uploader/main.js"></script>
+    <style>
+        body { font-family: Arial; margin: 20px; }
+        #editor { height: 400px; width: 100%; border: 1px solid #ccc; }
+        button { padding: 10px 20px; margin: 10px 0; font-size: 16px; }
+        pre#output { background: #f0f0f0; padding: 15px; border-radius: 5px; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <h1>Arduino Code Uploader (Cloud Compile + Direct Upload)</h1>
+    <p>Code likho, Compile karo (AWS pe), phir Upload karo Arduino me bina kisi software ke!</p>
+
+    <div id="editor">// Yahan apna Arduino code paste karo ya likho
+void setup() {
+  pinMode(LED_BUILTIN, OUTPUT);
+}
+void loop() {
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(1000);
+  digitalWrite(LED_BUILTIN, LOW);
+  delay(1000);
+}</div>
+
+    <button onclick="compileCode()">Compile on AWS</button>
+    <button id="uploadBtn" disabled>Upload to Arduino</button>
+
+    <pre id="output">Output yahan dikhega...</pre>
+
+    <script>
+        const editor = ace.edit("editor");
+        editor.session.setMode("ace/mode/c_cpp");
+
+        let hexData = null;
+        const backendUrl = 'http://13.234.67.141:3000';  // <--- YAHAN APNA AWS IP DAAL (jaise http://3.123.45.67:3000)
+
+        async function compileCode() {
+            const code = editor.getValue();
+            const output = document.getElementById('output');
+            output.textContent = 'Compiling on cloud (AWS)... Please wait...';
+
+            try {
+                const response = await fetch(`${backendUrl}/compile`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code })
+                });
+                const data = await response.json();
+
+                if (data.error) throw new Error(data.error);
+
+                hexData = data.hex;
+                output.textContent = 'Compiled successfully! HEX file ready. Ab Upload kar sakte ho.';
+                document.getElementById('uploadBtn').disabled = false;
+            } catch (err) {
+                output.textContent = 'Error: ' + err.message + '\n(Check AWS server running hai? Port 3000 open hai security group me?)';
+            }
+        }
+
+        document.getElementById('uploadBtn').addEventListener('click', async () => {
+            const output = document.getElementById('output');
+            if (!hexData) return alert('Pehle Compile karo!');
+
+            output.textContent = 'Connecting to Arduino... Upload shuru...';
+
+            try {
+                const blob = new Blob([hexData], { type: 'text/plain' });
+                const file = new File([blob], 'sketch.hex');
+
+                const uploader = new ArduinoUploader();
+                await uploader.upload(file, { board: 'uno' });  // 'uno' ya 'mega' change kar sakta hai
+
+                output.textContent = 'Success! Code Arduino me upload ho gaya. LED blink karega agar Blink sketch hai.';
+            } catch (err) {
+                output.textContent = 'Upload fail: ' + err.message + '\n(Arduino connect hai USB se? Chrome browser use kar rahe ho?)';
+            }
+        });
+    </script>
+</body>
+</html>
