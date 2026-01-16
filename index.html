@@ -37,7 +37,7 @@ void loop() {
         editor.session.setMode("ace/mode/c_cpp");
 
         let hexData = null;
-        const backendUrl = 'http://13.234.67.141:3000';  // <--- YAHAN APNA AWS IP DAAL (jaise http://3.123.45.67:3000)
+        const backendUrl = 'https://stemrobo.duckdns.org';  // <--- YAHAN APNA AWS IP DAAL (jaise http://3.123.45.67:3000)
 
         async function compileCode() {
             const code = editor.getValue();
