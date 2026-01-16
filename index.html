@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <title>Arduino Web Uploader</title>
     <script src="https://cdn.jsdelivr.net/npm/ace-builds@1.4.12/src-noconflict/ace.js"></script>
-    <!-- Avrgirl Arduino library for browser upload (WebUSB based) -->
-    <script src="https://unpkg.com/avrgirl-arduino@3.0.0/dist/avrgirl-arduino.browser.min.js"></script>
+    <!-- Avrgirl Arduino library (jsDelivr CDN for reliability) -->
+    <script src="https://cdn.jsdelivr.net/npm/avrgirl-arduino@3.0.0/dist/avrgirl-arduino.browser.min.js"></script>
     <style>
         body { font-family: Arial; margin: 20px; background: #f9f9f9; }
         #editor { height: 400px; width: 100%; border: 1px solid #ccc; border-radius: 5px; }
@@ -40,7 +40,7 @@ void loop() {
         editor.session.setMode("ace/mode/c_cpp");
 
         let hexData = null;
-        const backendUrl = 'https://stemrobo.duckdns.org';  // Tera HTTPS backend URL
+        const backendUrl = 'https://stemrobo.duckdns.org';
 
         async function compileCode() {
             const code = editor.getValue();
@@ -64,11 +64,12 @@ void loop() {
                 output.textContent = 'Compiled successfully! HEX file ready.\nAb Upload kar sakte ho.';
                 document.getElementById('uploadBtn').disabled = false;
             } catch (err) {
-                output.textContent = 'Compile Error: ' + err.message + '\n(Check console for details)';
-                console.error(err);
+                output.textContent = 'Compile Error: ' + err.message;
+                console.error('Compile error:', err);
             }
         }
 
+        // Upload function with library check
         document.getElementById('uploadBtn').addEventListener('click', async () => {
             const output = document.getElementById('output');
             if (!hexData) {
@@ -78,8 +79,14 @@ void loop() {
 
             output.textContent = 'Connecting to Arduino... Please wait...\n(Chrome me USB popup aayega - Arduino select karo)';
 
+            // Library check
+            if (typeof AvrgirlArduino === 'undefined') {
+                output.textContent = 'Error: Avrgirl library load nahi hui. Page refresh karo ya console check karo (F12).';
+                console.error('AvrgirlArduino not defined - library not loaded');
+                return;
+            }
+
             try {
-                // Avrgirl instance banao
                 const avrgirl = new AvrgirlArduino({
                     board: 'uno',  // Change to 'mega' or 'nano' if needed
                     debug: true
@@ -88,13 +95,13 @@ void loop() {
                 // HEX string ko Uint8Array me convert
                 const hexBuffer = new TextEncoder().encode(hexData);
 
-                // Flash karo
+                // Flash
                 await avrgirl.flash(hexBuffer);
 
                 output.textContent = 'Upload Success! Code Arduino me upload ho gaya.\nBoard reset ho raha hai... LED blink karega agar Blink sketch hai.';
             } catch (err) {
-                output.textContent = 'Upload Fail: ' + err.message + '\nCommon fixes:\n- Arduino USB se connected hai?\n- Chrome browser use kar rahe ho?\n- Board bootloader mode me hai? (Reset button double click kar)\n- CH340 driver installed hai? (Windows pe agar nahi to google kar install kar le)';
-                console.error('Upload error:', err);
+                output.textContent = 'Upload Fail: ' + err.message + '\nCommon fixes:\n1. Arduino USB se connected hai?\n2. Chrome browser use kar rahe ho?\n3. Board bootloader mode me hai? (Reset button double click kar)\n4. CH340/CH341 driver installed hai? (Windows pe Google kar install kar le)\n5. Page refresh kar ke fir try kar.';
+                console.error('Upload error details:', err);
             }
         });
     </script>
