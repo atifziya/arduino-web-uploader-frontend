@@ -4,17 +4,20 @@
     <meta charset="UTF-8">
     <title>Arduino Web Uploader</title>
     <script src="https://cdn.jsdelivr.net/npm/ace-builds@1.4.12/src-noconflict/ace.js"></script>
-    <script src="https://dbuezas.github.io/arduino-web-uploader/main.js"></script>
+    <!-- Avrgirl Arduino library for browser upload (WebUSB based) -->
+    <script src="https://unpkg.com/avrgirl-arduino@3.0.0/dist/avrgirl-arduino.browser.min.js"></script>
     <style>
-        body { font-family: Arial; margin: 20px; }
-        #editor { height: 400px; width: 100%; border: 1px solid #ccc; }
-        button { padding: 10px 20px; margin: 10px 0; font-size: 16px; }
-        pre#output { background: #f0f0f0; padding: 15px; border-radius: 5px; white-space: pre-wrap; }
+        body { font-family: Arial; margin: 20px; background: #f9f9f9; }
+        #editor { height: 400px; width: 100%; border: 1px solid #ccc; border-radius: 5px; }
+        button { padding: 12px 24px; margin: 10px 5px 10px 0; font-size: 16px; cursor: pointer; border: none; border-radius: 5px; }
+        #compileBtn { background: #4CAF50; color: white; }
+        #uploadBtn { background: #2196F3; color: white; }
+        #output { background: #f0f0f0; padding: 15px; border-radius: 5px; white-space: pre-wrap; min-height: 100px; font-family: monospace; }
     </style>
 </head>
 <body>
     <h1>Arduino Code Uploader (Cloud Compile + Direct Upload)</h1>
-    <p>Code likho, Compile karo (AWS pe), phir Upload karo Arduino me bina kisi software ke!</p>
+    <p>Code likho, Compile karo (AWS pe), phir Upload karo Arduino me bina kisi software ke! (Chrome browser use karo)</p>
 
     <div id="editor">// Yahan apna Arduino code paste karo ya likho
 void setup() {
@@ -27,7 +30,7 @@ void loop() {
   delay(1000);
 }</div>
 
-    <button onclick="compileCode()">Compile on AWS</button>
+    <button id="compileBtn" onclick="compileCode()">Compile on AWS</button>
     <button id="uploadBtn" disabled>Upload to Arduino</button>
 
     <pre id="output">Output yahan dikhega...</pre>
@@ -37,7 +40,7 @@ void loop() {
         editor.session.setMode("ace/mode/c_cpp");
 
         let hexData = null;
-        const backendUrl = 'https://stemrobo.duckdns.org';  // <--- YAHAN APNA AWS IP DAAL (jaise http://3.123.45.67:3000)
+        const backendUrl = 'https://stemrobo.duckdns.org';  // Tera HTTPS backend URL
 
         async function compileCode() {
             const code = editor.getValue();
@@ -50,34 +53,48 @@ void loop() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ code })
                 });
+
+                if (!response.ok) throw new Error('Network error: ' + response.status);
+
                 const data = await response.json();
 
                 if (data.error) throw new Error(data.error);
 
                 hexData = data.hex;
-                output.textContent = 'Compiled successfully! HEX file ready. Ab Upload kar sakte ho.';
+                output.textContent = 'Compiled successfully! HEX file ready.\nAb Upload kar sakte ho.';
                 document.getElementById('uploadBtn').disabled = false;
             } catch (err) {
-                output.textContent = 'Error: ' + err.message + '\n(Check AWS server running hai? Port 3000 open hai security group me?)';
+                output.textContent = 'Compile Error: ' + err.message + '\n(Check console for details)';
+                console.error(err);
             }
         }
 
         document.getElementById('uploadBtn').addEventListener('click', async () => {
             const output = document.getElementById('output');
-            if (!hexData) return alert('Pehle Compile karo!');
+            if (!hexData) {
+                alert('Pehle Compile karo!');
+                return;
+            }
 
-            output.textContent = 'Connecting to Arduino... Upload shuru...';
+            output.textContent = 'Connecting to Arduino... Please wait...\n(Chrome me USB popup aayega - Arduino select karo)';
 
             try {
-                const blob = new Blob([hexData], { type: 'text/plain' });
-                const file = new File([blob], 'sketch.hex');
+                // Avrgirl instance banao
+                const avrgirl = new AvrgirlArduino({
+                    board: 'uno',  // Change to 'mega' or 'nano' if needed
+                    debug: true
+                });
 
-                const uploader = new ArduinoUploader();
-                await uploader.upload(file, { board: 'uno' });  // 'uno' ya 'mega' change kar sakta hai
+                // HEX string ko Uint8Array me convert
+                const hexBuffer = new TextEncoder().encode(hexData);
 
-                output.textContent = 'Success! Code Arduino me upload ho gaya. LED blink karega agar Blink sketch hai.';
+                // Flash karo
+                await avrgirl.flash(hexBuffer);
+
+                output.textContent = 'Upload Success! Code Arduino me upload ho gaya.\nBoard reset ho raha hai... LED blink karega agar Blink sketch hai.';
             } catch (err) {
-                output.textContent = 'Upload fail: ' + err.message + '\n(Arduino connect hai USB se? Chrome browser use kar rahe ho?)';
+                output.textContent = 'Upload Fail: ' + err.message + '\nCommon fixes:\n- Arduino USB se connected hai?\n- Chrome browser use kar rahe ho?\n- Board bootloader mode me hai? (Reset button double click kar)\n- CH340 driver installed hai? (Windows pe agar nahi to google kar install kar le)';
+                console.error('Upload error:', err);
             }
         });
     </script>
