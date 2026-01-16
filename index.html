@@ -3,9 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <title>Arduino Web Uploader</title>
+    
     <script src="https://cdn.jsdelivr.net/npm/ace-builds@1.4.12/src-noconflict/ace.js"></script>
-    <!-- Avrgirl Arduino library (jsDelivr CDN for reliability) -->
+
+    <script src="https://cdn.jsdelivr.net/npm/buffer@6.0.3/index.min.js"></script>
+    <script>
+        // Buffer ko window object pe map karna zaroori hai
+        window.Buffer = buffer.Buffer; 
+    </script>
+
     <script src="https://cdn.jsdelivr.net/npm/avrgirl-arduino@3.0.0/dist/avrgirl-arduino.browser.min.js"></script>
+
     <style>
         body { font-family: Arial; margin: 20px; background: #f9f9f9; }
         #editor { height: 400px; width: 100%; border: 1px solid #ccc; border-radius: 5px; }
@@ -38,71 +46,72 @@ void loop() {
     <script>
         const editor = ace.edit("editor");
         editor.session.setMode("ace/mode/c_cpp");
+        editor.setValue(`void setup() { pinMode(LED_BUILTIN, OUTPUT); }\nvoid loop() { digitalWrite(LED_BUILTIN, HIGH); delay(500); digitalWrite(LED_BUILTIN, LOW); delay(500); }`);
 
         let hexData = null;
-        const backendUrl = 'https://stemrobo.duckdns.org';
+        const backendUrl = 'https://stemrobo.duckdns.org'; // Tumhara backend URL
 
         async function compileCode() {
             const code = editor.getValue();
             const output = document.getElementById('output');
-            output.textContent = 'Compiling on cloud (AWS)... Please wait...';
-
+            output.textContent = 'Compiling on AWS...';
+            
             try {
                 const response = await fetch(`${backendUrl}/compile`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ code })
                 });
-
-                if (!response.ok) throw new Error('Network error: ' + response.status);
-
                 const data = await response.json();
-
+                
                 if (data.error) throw new Error(data.error);
-
+                
                 hexData = data.hex;
-                output.textContent = 'Compiled successfully! HEX file ready.\nAb Upload kar sakte ho.';
-                document.getElementById('uploadBtn').disabled = false;
+                output.textContent = '✅ Compiled! HEX File Received.\nAb Upload button dabao.';
             } catch (err) {
-                output.textContent = 'Compile Error: ' + err.message;
-                console.error('Compile error:', err);
+                output.textContent = '❌ Compile Error: ' + err.message;
             }
         }
 
-        // Upload function with library check
+        // --- CORRECT UPLOAD LOGIC ---
         document.getElementById('uploadBtn').addEventListener('click', async () => {
             const output = document.getElementById('output');
-            if (!hexData) {
-                alert('Pehle Compile karo!');
-                return;
+            
+            if (!hexData) { alert('Pehle Compile karo!'); return; }
+            if (typeof AvrgirlArduino === 'undefined') { 
+                output.textContent = '❌ Error: Library load nahi hui. Buffer polyfill check karo.'; 
+                return; 
             }
 
-            output.textContent = 'Connecting to Arduino... Please wait...\n(Chrome me USB popup aayega - Arduino select karo)';
+            output.textContent = '⏳ Preparing upload...';
 
-            // Library check
-            if (typeof AvrgirlArduino === 'undefined') {
-                output.textContent = 'Error: Avrgirl library load nahi hui. Page refresh karo ya console check karo (F12).';
-                console.error('AvrgirlArduino not defined - library not loaded');
-                return;
-            }
+            // 1. HEX String ko BLOB (File) mein convert karna zaroori hai
+            const fileBlob = new Blob([hexData], { type: 'application/octet-stream' });
+            
+            // 2. FileReader se Binary ArrayBuffer padhna padega
+            const fileReader = new FileReader();
+            
+            fileReader.onload = async function(event) {
+                const fileBuffer = event.target.result;
 
-            try {
-                const avrgirl = new AvrgirlArduino({
-                    board: 'uno',  // Change to 'mega' or 'nano' if needed
-                    debug: true
-                });
+                try {
+                    const avrgirl = new AvrgirlArduino({
+                        board: 'uno', 
+                        debug: true
+                    });
 
-                // HEX string ko Uint8Array me convert
-                const hexBuffer = new TextEncoder().encode(hexData);
-
-                // Flash
-                await avrgirl.flash(hexBuffer);
-
-                output.textContent = 'Upload Success! Code Arduino me upload ho gaya.\nBoard reset ho raha hai... LED blink karega agar Blink sketch hai.';
-            } catch (err) {
-                output.textContent = 'Upload Fail: ' + err.message + '\nCommon fixes:\n1. Arduino USB se connected hai?\n2. Chrome browser use kar rahe ho?\n3. Board bootloader mode me hai? (Reset button double click kar)\n4. CH340/CH341 driver installed hai? (Windows pe Google kar install kar le)\n5. Page refresh kar ke fir try kar.';
-                console.error('Upload error details:', err);
-            }
+                    output.textContent = '🔌 Connecting... (Browser popup me Board select karo)';
+                    
+                    // Code flash karo
+                    await avrgirl.flash(fileBuffer);
+                    
+                    output.textContent = '🚀 Upload Success! Arduino check karo.';
+                } catch (err) {
+                    output.textContent = '❌ Upload Failed: ' + err.message;
+                }
+            };
+            
+            fileReader.readAsArrayBuffer(fileBlob);
         });
     </script>
 </body>
