@@ -3,48 +3,59 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arduino Web Uploader</title>
+    <title>Arduino Cloud Uploader</title>
     
     <script src="https://cdn.jsdelivr.net/npm/ace-builds@1.4.12/src-noconflict/ace.js"></script>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/buffer/6.0.3/buffer.min.js"></script>
+    
     <script>
-        // (A) Process Polyfill - Avrgirl ko crash hone se bachayega
+        // Step B: Manually attach Buffer to Window (Avrgirl needs this)
+        if (window.buffer) {
+            window.Buffer = window.buffer.Buffer;
+            console.log("✅ Buffer Polyfill Loaded Successfully");
+        } else {
+            console.error("❌ Critical: Buffer failed to load!");
+            alert("Error: Internet slow hai ya CDN block hai. Buffer load nahi hua.");
+        }
+
+        // Step C: Process Polyfill (Prevent crash in debug mode)
         window.process = { 
             env: { DEBUG: undefined }, 
-            version: '', 
+            version: '1.0.0', 
             nextTick: function(cb) { setTimeout(cb, 0); } 
         };
-    </script>
-    
-    <script src="https://bundle.run/buffer@6.0.3"></script>
-    <script>
-        // bundle.run 'buffer' ko window object pe expose karta hai
-        window.Buffer = window.buffer.Buffer; 
     </script>
 
     <script src="https://cdn.jsdelivr.net/npm/avrgirl-arduino@3.0.0/dist/avrgirl-arduino.browser.min.js"></script>
 
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; background: #f0f2f5; }
-        .container { max-width: 900px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h1 { color: #333; }
-        #editor { height: 400px; width: 100%; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 15px; }
-        .btn-group { display: flex; gap: 10px; margin-bottom: 15px; }
-        button { padding: 12px 24px; font-size: 16px; cursor: pointer; border: none; border-radius: 5px; transition: background 0.2s; color: white; font-weight: bold; }
-        #compileBtn { background: #2ecc71; }
-        #compileBtn:hover { background: #27ae60; }
-        #uploadBtn { background: #3498db; }
-        #uploadBtn:hover { background: #2980b9; }
-        #uploadBtn:disabled { background: #bdc3c7; cursor: not-allowed; }
-        #output { background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 5px; white-space: pre-wrap; min-height: 100px; font-family: monospace; overflow-x: auto; }
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; background: #f4f7f6; }
+        .container { max-width: 900px; margin: 0 auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        h1 { margin-top: 0; color: #2c3e50; }
+        p { color: #7f8c8d; }
+        #editor { height: 400px; width: 100%; border: 1px solid #bdc3c7; border-radius: 4px; margin-bottom: 20px; }
+        .status-box { padding: 15px; border-radius: 5px; margin-top: 20px; font-family: monospace; white-space: pre-wrap; background: #2c3e50; color: #ecf0f1; min-height: 80px; }
+        
+        .btn { padding: 12px 25px; font-size: 16px; cursor: pointer; border: none; border-radius: 5px; color: white; font-weight: 600; transition: all 0.3s; }
+        .btn-compile { background: #27ae60; } .btn-compile:hover { background: #2ecc71; }
+        .btn-upload { background: #2980b9; } .btn-upload:hover { background: #3498db; }
+        .btn:disabled { background: #95a5a6; cursor: not-allowed; }
+        
+        .alert-https { background: #fff3cd; color: #856404; padding: 10px; border-radius: 5px; margin-bottom: 15px; display: none; border: 1px solid #ffeeba; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Arduino Cloud Uploader</h1>
-        <p>1. Code likho -> 2. Compile (AWS) -> 3. Upload (Browser se seedha board mein)</p>
 
-        <div id="editor">// Blink Code Example
+<div class="container">
+    <h1>Arduino Cloud Uploader</h1>
+    <div id="httpsAlert" class="alert-https">
+        ⚠️ <strong>Warning:</strong> Browser "Not Secure" dikha raha hai. Web Serial (Upload) ke liye <strong>HTTPS</strong> zaroori hai.
+    </div>
+    
+    <p>Step 1: Code Likho &nbsp;➔&nbsp; Step 2: Compile (AWS) &nbsp;➔&nbsp; Step 3: Upload (Directly to Board)</p>
+
+    <div id="editor">// Blink Code Example
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
 }
@@ -56,104 +67,106 @@ void loop() {
   delay(500);
 }</div>
 
-        <div class="btn-group">
-            <button id="compileBtn" onclick="compileCode()">1. Compile on AWS</button>
-            <button id="uploadBtn" disabled>2. Upload to Arduino</button>
-        </div>
-
-        <div id="output">Status: Ready...</div>
+    <div>
+        <button id="compileBtn" class="btn btn-compile" onclick="compileCode()">1. Compile on AWS</button>
+        <button id="uploadBtn" class="btn btn-upload" disabled>2. Upload to Arduino</button>
     </div>
 
-    <script>
-        // --- EDITOR SETUP ---
-        const editor = ace.edit("editor");
-        editor.setTheme("ace/theme/github");
-        editor.session.setMode("ace/mode/c_cpp");
+    <div id="output" class="status-box">Status: Ready to code...</div>
+</div>
 
-        // --- GLOBAL VARS ---
-        let hexData = null;
-        // NOTE: Make sure DuckDNS URL is HTTPS correctly mapped
-        const backendUrl = 'https://stemrobo.duckdns.org'; 
+<script>
+    // --- 0. HTTPS & Serial Check ---
+    if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+        document.getElementById('httpsAlert').style.display = 'block';
+        document.getElementById('output').textContent += '\n⚠️ NOTE: Please use HTTPS, otherwise Upload button won\'t work.';
+    }
+    if (!navigator.serial) {
+        document.getElementById('output').textContent += '\n❌ ERROR: Web Serial API not supported in this browser. Use Chrome/Edge on Desktop/Android.';
+    }
 
-        // --- COMPILE FUNCTION ---
-        async function compileCode() {
-            const code = editor.getValue();
-            const output = document.getElementById('output');
-            const compileBtn = document.getElementById('compileBtn');
+    // --- 1. Editor Setup ---
+    const editor = ace.edit("editor");
+    editor.setTheme("ace/theme/github");
+    editor.session.setMode("ace/mode/c_cpp");
+
+    // --- 2. Global Variables ---
+    let hexData = null;
+    const backendUrl = 'https://stemrobo.duckdns.org'; 
+
+    // --- 3. Compile Function ---
+    async function compileCode() {
+        const code = editor.getValue();
+        const output = document.getElementById('output');
+        const compileBtn = document.getElementById('compileBtn');
+        
+        output.textContent = '⏳ Sending to AWS for compilation...';
+        compileBtn.disabled = true;
+
+        try {
+            const response = await fetch(`${backendUrl}/compile`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code })
+            });
+
+            if (!response.ok) throw new Error(`Server Error: ${response.status}`);
+            const data = await response.json();
+            if (data.error) throw new Error(data.error);
             
-            output.textContent = '⏳ Sending to AWS for compilation...';
-            compileBtn.disabled = true;
+            hexData = data.hex;
+            output.textContent = '✅ Compilation Success! HEX file received.\n👉 Ab "Upload to Arduino" button dabao.';
+            document.getElementById('uploadBtn').disabled = false;
+        } catch (err) {
+            output.textContent = '❌ Compile Failed: ' + err.message;
+        } finally {
+            compileBtn.disabled = false;
+        }
+    }
 
-            try {
-                const response = await fetch(`${backendUrl}/compile`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ code })
-                });
-
-                if (!response.ok) throw new Error(`Server Error: ${response.status}`);
-
-                const data = await response.json();
-                
-                if (data.error) throw new Error(data.error);
-                
-                hexData = data.hex;
-                output.textContent = '✅ Compilation Success! HEX file received.\n👉 Ab "Upload to Arduino" button dabao.';
-                document.getElementById('uploadBtn').disabled = false;
-            } catch (err) {
-                output.textContent = '❌ Compile Failed: ' + err.message;
-            } finally {
-                compileBtn.disabled = false;
-            }
+    // --- 4. Upload Function (The Fix) ---
+    document.getElementById('uploadBtn').addEventListener('click', async () => {
+        const output = document.getElementById('output');
+        
+        // Safety Checks
+        if (!hexData) { alert('Compile first!'); return; }
+        
+        // Check if Library loaded
+        if (typeof AvrgirlArduino === 'undefined') { 
+            output.textContent = '❌ Critical Error: Avrgirl Library load nahi hui.\nCheck Console (F12) for Buffer errors.'; 
+            return; 
         }
 
-        // --- UPLOAD FUNCTION ---
-        document.getElementById('uploadBtn').addEventListener('click', async () => {
-            const output = document.getElementById('output');
-            
-            if (!hexData) { 
-                alert('No HEX data found. Please compile first!'); 
-                return; 
+        output.textContent = '🔌 Preparing upload...';
+
+        // Convert HEX String -> Blob -> ArrayBuffer
+        const fileBlob = new Blob([hexData], { type: 'application/octet-stream' });
+        const fileReader = new FileReader();
+        
+        fileReader.onload = async function(event) {
+            const fileBuffer = event.target.result;
+
+            try {
+                const avrgirl = new AvrgirlArduino({
+                    board: 'uno', 
+                    debug: true
+                });
+
+                output.textContent = '⏳ Select Arduino in the popup window...';
+                
+                // Yeh line browser ka permission popup kholegi
+                await avrgirl.flash(fileBuffer);
+                
+                output.textContent = '🚀 SUCCESS: Code Uploaded Successfully!';
+            } catch (err) {
+                output.textContent = '❌ Upload Error: ' + err.message;
+                console.error(err);
             }
+        };
+        
+        fileReader.readAsArrayBuffer(fileBlob);
+    });
+</script>
 
-            // Library Check
-            if (typeof AvrgirlArduino === 'undefined') { 
-                output.textContent = '❌ Error: Avrgirl library load nahi hui. Internet check karo ya Buffer issue hai.'; 
-                return; 
-            }
-
-            output.textContent = '🔌 Preparing upload... Please wait...';
-
-            // 1. Convert HEX String to Blob (File Object)
-            const fileBlob = new Blob([hexData], { type: 'application/octet-stream' });
-            
-            // 2. Read Blob as ArrayBuffer (Binary)
-            const fileReader = new FileReader();
-            
-            fileReader.onload = async function(event) {
-                const fileBuffer = event.target.result;
-
-                try {
-                    // Board Configuration
-                    const avrgirl = new AvrgirlArduino({
-                        board: 'uno', 
-                        debug: true
-                    });
-
-                    output.textContent = '⏳ Browser popup aayega... Apne Arduino ko select karke "Connect" dabao.';
-                    
-                    // 3. Flash Code
-                    await avrgirl.flash(fileBuffer);
-                    
-                    output.textContent = '🚀 SUCCESS: Code Uploaded! Board reset ho raha hai.';
-                } catch (err) {
-                    output.textContent = '❌ Upload Error: ' + err.message;
-                    console.error(err);
-                }
-            };
-            
-            fileReader.readAsArrayBuffer(fileBlob);
-        });
-    </script>
 </body>
 </html>
