@@ -5,55 +5,99 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Arduino Cloud Uploader</title>
     
-    <script src="https://cdn.jsdelivr.net/npm/ace-builds@1.4.12/src-noconflict/ace.js"></script>
-
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/buffer/6.0.3/buffer.min.js"></script>
-    
     <script>
-        // Step B: Manually attach Buffer to Window (Avrgirl needs this)
-        if (window.buffer) {
-            window.Buffer = window.buffer.Buffer;
-            console.log("✅ Buffer Polyfill Loaded Successfully");
-        } else {
-            console.error("❌ Critical: Buffer failed to load!");
-            alert("Error: Internet slow hai ya CDN block hai. Buffer load nahi hua.");
+        if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+            console.log("Redirecting to HTTPS...");
+            location.replace(`https:${location.href.substring(location.protocol.length)}`);
         }
-
-        // Step C: Process Polyfill (Prevent crash in debug mode)
-        window.process = { 
-            env: { DEBUG: undefined }, 
-            version: '1.0.0', 
-            nextTick: function(cb) { setTimeout(cb, 0); } 
-        };
     </script>
 
-    <script src="https://cdn.jsdelivr.net/npm/avrgirl-arduino@3.0.0/dist/avrgirl-arduino.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/ace.js"></script>
+
+    <script>
+        // Global Error Handler for Scripts
+        function loadScript(src, fallbackSrc) {
+            return new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = src;
+                script.onload = resolve;
+                script.onerror = () => {
+                    console.warn(`Primary source failed: ${src}. Trying fallback: ${fallbackSrc}`);
+                    if (fallbackSrc) {
+                        const fallback = document.createElement('script');
+                        fallback.src = fallbackSrc;
+                        fallback.onload = resolve;
+                        fallback.onerror = reject;
+                        document.head.appendChild(fallback);
+                    } else {
+                        reject();
+                    }
+                };
+                document.head.appendChild(script);
+            });
+        }
+
+        // Initialize App
+        async function initApp() {
+            const status = document.getElementById('output');
+            
+            try {
+                // Step A: Load Buffer (Try unpkg first, then cdnjs)
+                await loadScript(
+                    'https://unpkg.com/buffer@6.0.3/index.js', 
+                    'https://cdnjs.cloudflare.com/ajax/libs/buffer/6.0.3/buffer.min.js'
+                );
+                
+                // Manual Buffer Attach
+                if (window.buffer) window.Buffer = window.buffer.Buffer;
+                
+                // Backup Micro-Polyfill (Agar upar wale dono fail ho jayein)
+                if (!window.Buffer) {
+                    console.log("Using emergency fallback for Buffer");
+                    window.Buffer = function(arg) { return new Uint8Array(arg); }; 
+                    window.Buffer.from = function(arg) { return new Uint8Array(arg); };
+                }
+
+                // Step B: Process Polyfill
+                window.process = { env: { DEBUG: undefined }, version: '1.0.0', nextTick: (cb) => setTimeout(cb, 0) };
+
+                // Step C: Load Avrgirl (Try unpkg first, then jsdelivr)
+                await loadScript(
+                    'https://unpkg.com/avrgirl-arduino@3.0.0/dist/avrgirl-arduino.browser.min.js',
+                    'https://cdn.jsdelivr.net/npm/avrgirl-arduino@3.0.0/dist/avrgirl-arduino.browser.min.js'
+                );
+
+                console.log("✅ All libraries loaded!");
+                document.getElementById('loadingMsg').style.display = 'none';
+            } catch (err) {
+                console.error(err);
+                status.textContent = "❌ CRITICAL: Libraries blocked by network. Try using a Mobile Hotspot.";
+                status.style.background = "#e74c3c";
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', initApp);
+    </script>
 
     <style>
         body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; background: #f4f7f6; }
         .container { max-width: 900px; margin: 0 auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        h1 { margin-top: 0; color: #2c3e50; }
-        p { color: #7f8c8d; }
+        h1 { margin-top: 0; color: #2c3e50; font-size: 24px; }
         #editor { height: 400px; width: 100%; border: 1px solid #bdc3c7; border-radius: 4px; margin-bottom: 20px; }
         .status-box { padding: 15px; border-radius: 5px; margin-top: 20px; font-family: monospace; white-space: pre-wrap; background: #2c3e50; color: #ecf0f1; min-height: 80px; }
-        
-        .btn { padding: 12px 25px; font-size: 16px; cursor: pointer; border: none; border-radius: 5px; color: white; font-weight: 600; transition: all 0.3s; }
-        .btn-compile { background: #27ae60; } .btn-compile:hover { background: #2ecc71; }
-        .btn-upload { background: #2980b9; } .btn-upload:hover { background: #3498db; }
+        .btn { padding: 12px 25px; font-size: 16px; cursor: pointer; border: none; border-radius: 5px; color: white; font-weight: 600; margin-right: 10px; }
+        .btn-compile { background: #27ae60; } 
+        .btn-upload { background: #2980b9; } 
         .btn:disabled { background: #95a5a6; cursor: not-allowed; }
-        
-        .alert-https { background: #fff3cd; color: #856404; padding: 10px; border-radius: 5px; margin-bottom: 15px; display: none; border: 1px solid #ffeeba; }
+        #loadingMsg { background: #f1c40f; color: #000; padding: 10px; text-align: center; border-radius: 5px; margin-bottom: 20px; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>Arduino Cloud Uploader</h1>
-    <div id="httpsAlert" class="alert-https">
-        ⚠️ <strong>Warning:</strong> Browser "Not Secure" dikha raha hai. Web Serial (Upload) ke liye <strong>HTTPS</strong> zaroori hai.
-    </div>
+    <h1>☁️ Arduino Cloud Uploader (Secure)</h1>
     
-    <p>Step 1: Code Likho &nbsp;➔&nbsp; Step 2: Compile (AWS) &nbsp;➔&nbsp; Step 3: Upload (Directly to Board)</p>
+    <div id="loadingMsg">⏳ Loading Libraries... Please wait...</div>
 
     <div id="editor">// Blink Code Example
 void setup() {
@@ -62,9 +106,9 @@ void setup() {
 
 void loop() {
   digitalWrite(LED_BUILTIN, HIGH);
-  delay(500);
+  delay(100);
   digitalWrite(LED_BUILTIN, LOW);
-  delay(500);
+  delay(100);
 }</div>
 
     <div>
@@ -76,15 +120,6 @@ void loop() {
 </div>
 
 <script>
-    // --- 0. HTTPS & Serial Check ---
-    if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-        document.getElementById('httpsAlert').style.display = 'block';
-        document.getElementById('output').textContent += '\n⚠️ NOTE: Please use HTTPS, otherwise Upload button won\'t work.';
-    }
-    if (!navigator.serial) {
-        document.getElementById('output').textContent += '\n❌ ERROR: Web Serial API not supported in this browser. Use Chrome/Edge on Desktop/Android.';
-    }
-
     // --- 1. Editor Setup ---
     const editor = ace.edit("editor");
     editor.setTheme("ace/theme/github");
@@ -124,16 +159,14 @@ void loop() {
         }
     }
 
-    // --- 4. Upload Function (The Fix) ---
+    // --- 4. Upload Function ---
     document.getElementById('uploadBtn').addEventListener('click', async () => {
         const output = document.getElementById('output');
         
-        // Safety Checks
         if (!hexData) { alert('Compile first!'); return; }
         
-        // Check if Library loaded
         if (typeof AvrgirlArduino === 'undefined') { 
-            output.textContent = '❌ Critical Error: Avrgirl Library load nahi hui.\nCheck Console (F12) for Buffer errors.'; 
+            output.textContent = '❌ Error: Libraries failed to load. Check internet connection.'; 
             return; 
         }
 
@@ -152,9 +185,8 @@ void loop() {
                     debug: true
                 });
 
-                output.textContent = '⏳ Select Arduino in the popup window...';
+                output.textContent = '⏳ Popup aayega -> Arduino Select karo -> Connect dabao...';
                 
-                // Yeh line browser ka permission popup kholegi
                 await avrgirl.flash(fileBuffer);
                 
                 output.textContent = '🚀 SUCCESS: Code Uploaded Successfully!';
